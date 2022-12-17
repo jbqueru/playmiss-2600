@@ -101,7 +101,7 @@ Clear:	STA	0,X
 	BNE	Clear
 
 Loop:
-; Overscan
+; Overscan - 30 lines total
 	STA	_TIA_WSYNC	; overscan line 1
 	LDA	#2
 	STA	_TIA_VBLANK	; turn display off
@@ -111,15 +111,14 @@ Overscan:
 	DEY
         BNE	Overscan
 
-; Vsync
+; Vsync - 3 lines
 	STA	_TIA_WSYNC	; vsync line 1
 	LDA	#2
 	STA	_TIA_VSYNC	; turn sync on
-	.repeat 2
-	STA	_TIA_WSYNC	; vsync line 2-3
-	.repend
+	STA	_TIA_WSYNC	; vsync line 2
+	STA	_TIA_WSYNC	; vsync line 3
 
-; Vblank
+; Vblank - 37 lines total
 	STA	_TIA_WSYNC	; vblank line 1
 	LDA	#
 	STA	_TIA_VSYNC	; turn sync off
@@ -129,7 +128,10 @@ Vblank:
 	DEY
         BNE	Vblank
 
-	STA	_TIA_WSYNC	; vblank line 36
+; -------------------------------
+; vblank line 36
+; align sprites
+	STA	_TIA_WSYNC
 
 	; Delay code 24 clocks
 	LDA	#$0A		; 2 clocks
@@ -145,20 +147,27 @@ Vblank:
         LDA	#2
         STA	_TIA_ENAM0
 
-	STA	_TIA_WSYNC	; vblank line 37
+; -------------------------------
+; vblank line 37
+; turn display on and start render loop
+        STA	_TIA_WSYNC
 
-	; Delay code 66 clocks
-	LDX	#13		; 2 clocks
-	DEX			; 13 * 2 clocks = 26
-	BNE	*-1		; 12 * 3 clocks + 2 = 38
+	; Delay code 61 clocks
+	LDX	#12		; 2 clocks
+	DEX			; 12 * 2 clocks = 24
+	BNE	*-1		; 11 * 3 clocks + 2 = 35
 
-	LDY	#192		; clock 66
+	NOP			; clock 61
+	LDY	#192		; clock 63
+        STY	$80		; clock 65
+
 	LDA	#0		; clock 68
 	STA	_TIA_VBLANK	; clock 70 - finish on 73
 
+; -------------------------------
 Lines:
 	STA	_TIA_WSYNC	; active line 1-192
-	DEY
+	DEC	$80
         BNE	Lines
 
 	JMP	Loop
