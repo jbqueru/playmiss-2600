@@ -123,20 +123,41 @@ Overscan:
 	STA	_TIA_WSYNC	; vblank line 1
 	LDA	#
 	STA	_TIA_VSYNC	; turn sync off
-	LDY	#36
+	LDY	#34
 Vblank:
-	STA	_TIA_WSYNC	; vblank line 2-37
+	STA	_TIA_WSYNC	; vblank line 2-35
 	DEY
         BNE	Vblank
 
-; Active area
-	STA	_TIA_WSYNC	; active line 1
-	LDA	#0
-	STA	_TIA_VBLANK	; turn display on
+	STA	_TIA_WSYNC	; vblank line 36
 
-	LDY	#191
+	; Delay code 24 clocks
+	LDA	#$0A		; 2 clocks
+        ; hidden ASL		; 4 * 2 clocks = 8
+	BPL	*-1		; 4 * 3 clocks + 2 = 14
+
+	STA	_TIA_RESP0
+        STA	_TIA_RESM0
+        LDA	#_TIA_CO_TURQ+_TIA_LU_MAX
+        STA	_TIA_COLUP0
+        LDA	#$AA
+        STA	_TIA_GRP0
+        LDA	#2
+        STA	_TIA_ENAM0
+
+	STA	_TIA_WSYNC	; vblank line 37
+
+	; Delay code 66 clocks
+	LDX	#13		; 2 clocks
+	DEX			; 13 * 2 clocks = 26
+	BNE	*-1		; 12 * 3 clocks + 2 = 38
+
+	LDY	#192		; clock 66
+	LDA	#0		; clock 68
+	STA	_TIA_VBLANK	; clock 70 - finish on 73
+
 Lines:
-	STA	_TIA_WSYNC	; active line 2-192
+	STA	_TIA_WSYNC	; active line 1-192
 	DEY
         BNE	Lines
 
