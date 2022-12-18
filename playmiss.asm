@@ -86,7 +86,7 @@ _TIA_LU_LIGHT	.equ	$A
 _TIA_LU_V_LIGHT	.equ	$C
 _TIA_LU_MAX	.equ	$E
 
-	.org	$F000
+	.org	$F000,0
 Main:
 ; Set up CPU
 	CLD
@@ -100,7 +100,14 @@ Clear:	STA	0,X
 	INX
 	BNE	Clear
 
+; Set the player/missile graphics pointers
+	LDA	#0
+	STA	$80
+	LDA	#$F1
+	STA	$81
+
 Loop:
+; -------------------------------
 ; Overscan - 30 lines total
 	STA	_TIA_WSYNC	; overscan line 1
 	LDA	#2
@@ -109,8 +116,9 @@ Loop:
 Overscan:
 	STA	_TIA_WSYNC	; overscan line 2-30
 	DEY
-        BNE	Overscan
+	BNE	Overscan
 
+; -------------------------------
 ; Vsync - 3 lines
 	STA	_TIA_WSYNC	; vsync line 1
 	LDA	#2
@@ -118,6 +126,7 @@ Overscan:
 	STA	_TIA_WSYNC	; vsync line 2
 	STA	_TIA_WSYNC	; vsync line 3
 
+; -------------------------------
 ; Vblank - 37 lines total
 	STA	_TIA_WSYNC	; vblank line 1
 	LDA	#
@@ -126,51 +135,556 @@ Overscan:
 Vblank:
 	STA	_TIA_WSYNC	; vblank line 2-35
 	DEY
-        BNE	Vblank
+	BNE	Vblank
 
 ; -------------------------------
-; vblank line 36
-; align sprites
+; Vblank line 36
+; Align sprites
 	STA	_TIA_WSYNC
 
-	; Delay code 24 clocks
+	; Start delay code 44 clocks
 	LDA	#$0A		; 2 clocks
-        ; hidden ASL		; 4 * 2 clocks = 8
-	BPL	*-1		; 4 * 3 clocks + 2 = 14
+	; hidden ASL		; 4 * 2 clocks = 8
+	NOP			; 5 * 2 clocks
+	NOP			; 5 * 2 clocks
+	BPL	*-3		; 4 * 3 clocks + 2 = 14
+	; End delay code 44 clocks
 
 	STA	_TIA_RESP0
-        STA	_TIA_RESM0
-        LDA	#_TIA_CO_TURQ+_TIA_LU_MAX
-        STA	_TIA_COLUP0
-        LDA	#$AA
-        STA	_TIA_GRP0
-        LDA	#2
-        STA	_TIA_ENAM0
+	STA	_TIA_RESM0
+	LDA	#_TIA_CO_TURQ+_TIA_LU_MAX
+	STA	_TIA_COLUP0
+	LDA	#$AA
+	STA	_TIA_GRP0
+	LDA	#2
+	STA	_TIA_ENAM0
+
+	LDA	$80
+	CLC
+	ADC	#2
+	STA	$80
+	BCC	DonePtr
+	INC	$81
+	LDA	#$F3
+	CMP	$81
+	BNE	DonePtr
+	LDA	#$F1
+        STA	$81
+DonePtr:
+; -------------------------------
+; Vblank line 37
+; Turn display on and start render loop
+	STA	_TIA_WSYNC
+
+	; Start delay code 68 clocks
+	LDX	#13		; 2 clocks
+	DEX			; 13 * 2 clocks = 26
+	BNE	*-1		; 12 * 3 clocks + 2 = 38
+	NOP			; 2 clocks
+	; End delay code 68 clocks
+
+	LDY	#0		; clock 68
+	STY	_TIA_VBLANK	; clock 70 - finish on 73
 
 ; -------------------------------
-; vblank line 37
-; turn display on and start render loop
-        STA	_TIA_WSYNC
-
-	; Delay code 61 clocks
-	LDX	#12		; 2 clocks
-	DEX			; 12 * 2 clocks = 24
-	BNE	*-1		; 11 * 3 clocks + 2 = 35
-
-	NOP			; clock 61
-	LDY	#192		; clock 63
-        STY	$80		; clock 65
-
-	LDA	#0		; clock 68
-	STA	_TIA_VBLANK	; clock 70 - finish on 73
-
-; -------------------------------
+; Active lines 1-128
 Lines:
-	STA	_TIA_WSYNC	; active line 1-192
-	DEC	$80
-        BNE	Lines
+	STA	_TIA_WSYNC
+	LDA	($80),Y
+	STA	_TIA_GRP0
+	INY
+	LDA	($80),Y
+	STA	_TIA_ENAM0
+	INY
+	BNE	Lines
 
+; -------------------------------
+; Active line 129
+	STA	_TIA_WSYNC
+	LDA	#0
+	STA	_TIA_GRP0
+	STA	_TIA_ENAM0
+	LDY	#63
+
+; -------------------------------
+; Active lines 130-192
+ExtraLines:
+	STA	_TIA_WSYNC
+	DEY
+	BNE	ExtraLines
+
+; -------------------------------
 	JMP	Loop
+
+; The actual graphics
+	.org	$F100
+Bitmap:
+	.byte	%11100011,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11111111,2
+
+	.byte	%11111111,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11100011,2
+
+	.byte	0,0
+	.byte	0,0
+
+	.byte	%11111111,2
+	.byte	%11111111,2
+	.byte	%11000000,2
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000010,0
+	.byte	%11111110,0
+
+	.byte	%11111110,0
+	.byte	%11000010,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,2
+	.byte	%11111111,2
+	.byte	%11111111,2
+
+	.byte	0,0
+	.byte	0,0
+
+	.byte	%11100000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,2
+	.byte	%11111111,2
+	.byte	%11111111,2
+
+	.byte	0,0
+	.byte	0,0
+
+	.byte	%11100000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,2
+	.byte	%11111111,2
+	.byte	%11111111,2
+
+	.byte	0,0
+	.byte	0,0
+
+	.byte	%00011100,0
+	.byte	%00111110,0
+	.byte	%01110111,0
+	.byte	%01100011,0
+	.byte	%11100011,2
+
+	.byte	%11100011,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11100011,2
+
+	.byte	%01100011,0
+	.byte	%01100011,0
+	.byte	%01110111,0
+	.byte	%00111110,0
+	.byte	%00011100,0
+
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+
+	.byte	%11100011,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11001001,2
+	.byte	%11001001,2
+	.byte	%11001001,2
+
+	.byte	%11011101,2
+	.byte	%11011101,2
+	.byte	%11111111,2
+	.byte	%01110111,0
+	.byte	%01100011,0
+
+	.byte	0,0
+	.byte	0,0
+
+	.byte	%00011100,0
+	.byte	%00111110,0
+	.byte	%01110111,0
+	.byte	%01100011,0
+	.byte	%11100011,2
+
+	.byte	%11100011,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11100011,2
+
+	.byte	%01100011,0
+	.byte	%01100011,0
+	.byte	%01110111,0
+	.byte	%00111110,0
+	.byte	%00011100,0
+
+	.byte	0,0
+	.byte	0,0
+
+	.byte	%11111110,0
+	.byte	%11111111,0
+	.byte	%11000011,0
+	.byte	%11000001,2
+	.byte	%11000001,2
+
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000011,0
+
+	.byte	%11111111,0
+	.byte	%11111111,0
+	.byte	%11000011,0
+	.byte	%11000001,2
+	.byte	%11000001,2
+
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11100011,2
+	.byte	0,0
+	.byte	0,0
+
+	.byte	%11100000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,2
+	.byte	%11111111,2
+	.byte	%11111111,2
+
+	.byte	0,0
+	.byte	0,0
+
+	.byte	%11111100,0
+	.byte	%11111110,0
+	.byte	%11000111,0
+	.byte	%11000011,0
+	.byte	%11000011,2
+
+	.byte	%11000011,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000011,2
+
+	.byte	%11000011,0
+	.byte	%11000011,0
+	.byte	%11000111,0
+	.byte	%11111110,0
+	.byte	%11111100,0
+
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+
+	.byte	%11100011,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11111111,2
+
+	.byte	%11111111,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11100011,2
+
+	.byte	0,0
+	.byte	0,0
+
+	.byte	%11111111,2
+	.byte	%11111111,2
+	.byte	%11000000,2
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000010,0
+	.byte	%11111110,0
+
+	.byte	%11111110,0
+	.byte	%11000010,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,2
+	.byte	%11111111,2
+	.byte	%11111111,2
+
+	.byte	0,0
+	.byte	0,0
+
+	.byte	%11100000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,2
+	.byte	%11111111,2
+	.byte	%11111111,2
+
+	.byte	0,0
+	.byte	0,0
+
+	.byte	%11100000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,0
+
+	.byte	%11000000,0
+	.byte	%11000000,0
+	.byte	%11000000,2
+	.byte	%11111111,2
+	.byte	%11111111,2
+
+	.byte	0,0
+	.byte	0,0
+
+	.byte	%00011100,0
+	.byte	%00111110,0
+	.byte	%01110111,0
+	.byte	%01100011,0
+	.byte	%11100011,2
+
+	.byte	%11100011,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11000001,2
+	.byte	%11100011,2
+
+	.byte	%01100011,0
+	.byte	%01100011,0
+	.byte	%01110111,0
+	.byte	%00111110,0
+	.byte	%00011100,0
+
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
+	.byte	0,0
 
 ; Reset / Start vectors
 	.org	$FFFC
