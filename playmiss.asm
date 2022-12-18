@@ -31,26 +31,20 @@
 ;;; snippets of code without understanding what they do.
 ;;;
 ;;; I posted about my experience on LinkedIn along with some code snippets,
-;;; and a coworker noticed an ominous  comment that ChatGPT had generated:
+;;; and a coworker noticed an ominous comment that ChatGPT had generated:
 ;;; "Set the player/missile graphics pointers".
 ;;;
 ;;; The 2600 has player/missile size (NUSIZn), player/missile color (COLUPn),
-;;; but there's no such think as missile graphics.
+;;; but there's no such think as missile graphics or player/missile graphics.
+;;; Also, that exact sentence doesn't show up on Google, which does suggest
+;;; that ChatGPT really made it up.
 ;;;
 ;;; The challenge was on, I made it a mission to create a Hello World where
 ;;; that specific comment would make sense. This is the result.
 ;;;
-;;; The basic idea here is to use the missile as a 9th pixel, immediately
-;;; touching a single copy of the player graphics, to use that as the
-;;; support for a scroller, and to have a single pointer for the entire
-;;; graphics.
-;;;
-;;; I limited myself to 128 lines instead of the usual 192, because that
-;;; made some of the coding easier. In reality, using 9 pixels that way
-;;; would probably be easier with 2 separate pointers: that would allow
-;;; 192 lines (or more) more easily, and it would save an index increment
-;;; per line. In that case, though, the exact comment that ChatGPT had
-;;; generated wouldn't make as much sense.
+;;; The basic idea here is to use the missile as a 9th pixel to the right
+;;; of the player graphics, to use those 9 pixels as the support for a
+;;; scroller, and to have pointers to the relevant graphics.
 ;;;
 ;;; There you have it, a piece of code created specifically to be able
 ;;; to use an improbable AI-generated comment.
@@ -130,8 +124,10 @@ _TIA_LU_LIGHT	.equ	$A
 _TIA_LU_V_LIGHT	.equ	$C
 _TIA_LU_MAX	.equ	$E
 
-_ZP_PMG_PTR_LO	.equ	$80
-_ZP_PMG_PTR_HI	.equ	$81
+_ZP_PG_PTR_LO	.equ	$80
+_ZP_PG_PTR_HI	.equ	$81
+_ZP_MG_PTR_LO	.equ	$82
+_ZP_MG_PTR_HI	.equ	$83
 
 	.org	$F000,0
 Main:
@@ -151,9 +147,14 @@ ClearZeroPage:
 ; Set the player/missile graphics pointers
 ; (!!!)
 	LDA	#0
-	STA	_ZP_PMG_PTR_LO
-	LDA	#Bitmap >> 8
-	STA	_ZP_PMG_PTR_HI
+	STA	_ZP_PG_PTR_LO
+	LDA	#BitmapL >> 8
+	STA	_ZP_PG_PTR_HI
+
+	LDA	#0
+	STA	_ZP_MG_PTR_LO
+	LDA	#BitmapR >> 8
+	STA	_ZP_MG_PTR_HI
 
 Loop:
 ; -------------------------------
@@ -178,7 +179,7 @@ Overscan:
 ; -------------------------------
 ; Vblank - 37 lines total
 	STA	_TIA_WSYNC	; vblank line 1
-	LDA	#
+	LDA	#0
 	STA	_TIA_VSYNC	; turn sync off
 	LDY	#34
 Vblank:
@@ -203,541 +204,687 @@ Vblank:
 	; There's a bit of black magic here: even though the two writes to
 	; tRESP0 and RESM0 are 9 pixels apart (3 CPU cycles), the graphics
 	; end up only 8 pixels apart, because player graphics appear 1 pixel
-	; furhter to the right than ball/missile for the same setting.
+	; further to the right than ball/missile for the same setting.
 	STA	_TIA_RESP0	; position player graphics.
 	STA	_TIA_RESM0	; position missile.
 	LDA	#_TIA_CO_TURQ+_TIA_LU_MAX
 	STA	_TIA_COLUP0
 
-	; Advance the player/missile graphics pointer
-	LDA	_ZP_PMG_PTR_LO
-	CLC
-	ADC	#2
-	STA	_ZP_PMG_PTR_LO
-	BCC	DonePtr
-	INC	_ZP_PMG_PTR_HI
-	LDA	#(Bitmap >> 8) +2
-	CMP	_ZP_PMG_PTR_HI
-	BNE	DonePtr
-	LDA	#Bitmap >> 8
-        STA	_ZP_PMG_PTR_HI
-DonePtr:
+	; Advance the player/missile graphics pointers
+	INC	_ZP_PG_PTR_LO
+	INC	_ZP_MG_PTR_LO
 
 ; -------------------------------
 ; Vblank line 37
 ; Turn display on and start render loop
 	STA	_TIA_WSYNC
 
-	; Start delay code 68 clocks
+	; Start delay code 66 clocks
         ; WARNING: BRANCH MUST NOT CROSS PAGE BOUNDARY
 	LDX	#13		; 2 clocks
 	DEX			; 13 * 2 clocks = 26
 	BNE	*-1		; 12 * 3 clocks + 2 = 38
-	NOP			; 2 clocks
-	; End delay code 68 clocks
+	; End delay code 66 clocks
 
-	LDY	#0		; clock 68
-	STY	_TIA_VBLANK	; clock 70 - finish on 73
+	LDY	#65		; clock 66
+	LDA	#0		; clock 68
+	STA	_TIA_VBLANK	; clock 70 - finish on 73
 
 ; -------------------------------
-; Active lines 1-128
+; Active lines 1-191
 Lines:
 	STA	_TIA_WSYNC
-	LDA	($80),Y
+	LDA	(_ZP_PG_PTR_LO),Y	; Left graphics
 	STA	_TIA_GRP0
-	INY
-	LDA	($80),Y
+	LDA	(_ZP_MG_PTR_LO),Y	; Right graphics
 	STA	_TIA_ENAM0
 	INY
 	BNE	Lines
 
 ; -------------------------------
-; Active line 129
+; Active line 192
 	STA	_TIA_WSYNC
 	LDA	#0
 	STA	_TIA_GRP0
 	STA	_TIA_ENAM0
-	LDY	#63
-
-; -------------------------------
-; Active lines 130-192
-ExtraLines:
-	STA	_TIA_WSYNC
-	DEY
-	BNE	ExtraLines
 
 ; -------------------------------
 	JMP	Loop
 
 ; The actual graphics
-	.org	$F100,01	; MUST BE PAGE-ALIGNED
-Bitmap:
-	.byte	%11100011,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11111111,2
-
-	.byte	%11111111,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11100011,2
-
-	.byte	0,0
-	.byte	0,0
-
-	.byte	%11111111,2
-	.byte	%11111111,2
-	.byte	%11000000,2
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000010,0
-	.byte	%11111110,0
-
-	.byte	%11111110,0
-	.byte	%11000010,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,2
-	.byte	%11111111,2
-	.byte	%11111111,2
-
-	.byte	0,0
-	.byte	0,0
-
-	.byte	%11100000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,2
-	.byte	%11111111,2
-	.byte	%11111111,2
-
-	.byte	0,0
-	.byte	0,0
-
-	.byte	%11100000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,2
-	.byte	%11111111,2
-	.byte	%11111111,2
-
-	.byte	0,0
-	.byte	0,0
-
-	.byte	%00011100,0
-	.byte	%00111110,0
-	.byte	%01110111,0
-	.byte	%01100011,0
-	.byte	%11100011,2
-
-	.byte	%11100011,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11100011,2
-
-	.byte	%01100011,0
-	.byte	%01100011,0
-	.byte	%01110111,0
-	.byte	%00111110,0
-	.byte	%00011100,0
-
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-
-	.byte	%11100011,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11001001,2
-	.byte	%11001001,2
-	.byte	%11001001,2
-
-	.byte	%11011101,2
-	.byte	%11011101,2
-	.byte	%11111111,2
-	.byte	%01110111,0
-	.byte	%01100011,0
-
-	.byte	0,0
-	.byte	0,0
-
-	.byte	%00011100,0
-	.byte	%00111110,0
-	.byte	%01110111,0
-	.byte	%01100011,0
-	.byte	%11100011,2
-
-	.byte	%11100011,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11100011,2
-
-	.byte	%01100011,0
-	.byte	%01100011,0
-	.byte	%01110111,0
-	.byte	%00111110,0
-	.byte	%00011100,0
-
-	.byte	0,0
-	.byte	0,0
-
-	.byte	%11111110,0
-	.byte	%11111111,0
-	.byte	%11000011,0
-	.byte	%11000001,2
-	.byte	%11000001,2
-
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000011,0
-
-	.byte	%11111111,0
-	.byte	%11111111,0
-	.byte	%11000011,0
-	.byte	%11000001,2
-	.byte	%11000001,2
-
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11100011,2
-	.byte	0,0
-	.byte	0,0
-
-	.byte	%11100000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,2
-	.byte	%11111111,2
-	.byte	%11111111,2
-
-	.byte	0,0
-	.byte	0,0
-
-	.byte	%11111100,0
-	.byte	%11111110,0
-	.byte	%11000111,0
-	.byte	%11000011,0
-	.byte	%11000011,2
-
-	.byte	%11000011,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000011,2
-
-	.byte	%11000011,0
-	.byte	%11000011,0
-	.byte	%11000111,0
-	.byte	%11111110,0
-	.byte	%11111100,0
-
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-
-	.byte	%11100011,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11111111,2
-
-	.byte	%11111111,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11100011,2
-
-	.byte	0,0
-	.byte	0,0
-
-	.byte	%11111111,2
-	.byte	%11111111,2
-	.byte	%11000000,2
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000010,0
-	.byte	%11111110,0
-
-	.byte	%11111110,0
-	.byte	%11000010,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,2
-	.byte	%11111111,2
-	.byte	%11111111,2
-
-	.byte	0,0
-	.byte	0,0
-
-	.byte	%11100000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,2
-	.byte	%11111111,2
-	.byte	%11111111,2
-
-	.byte	0,0
-	.byte	0,0
-
-	.byte	%11100000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,0
-
-	.byte	%11000000,0
-	.byte	%11000000,0
-	.byte	%11000000,2
-	.byte	%11111111,2
-	.byte	%11111111,2
-
-	.byte	0,0
-	.byte	0,0
-
-	.byte	%00011100,0
-	.byte	%00111110,0
-	.byte	%01110111,0
-	.byte	%01100011,0
-	.byte	%11100011,2
-
-	.byte	%11100011,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11000001,2
-	.byte	%11100011,2
-
-	.byte	%01100011,0
-	.byte	%01100011,0
-	.byte	%01110111,0
-	.byte	%00111110,0
-	.byte	%00011100,0
-
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
-	.byte	0,0
+	.org	$F100,0		; MUST BE PAGE-ALIGNED
+BitmapL:
+	.repeat 2
+
+	.byte	%11100011
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11111111
+
+	.byte	%11111111
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11100011
+
+	.byte	0
+	.byte	0
+
+	.byte	%11111111
+	.byte	%11111111
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000010
+	.byte	%11111110
+
+	.byte	%11111110
+	.byte	%11000010
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11111111
+	.byte	%11111111
+
+	.byte	0
+	.byte	0
+
+	.byte	%11100000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11111111
+	.byte	%11111111
+
+	.byte	0
+	.byte	0
+
+	.byte	%11100000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11111111
+	.byte	%11111111
+
+	.byte	0
+	.byte	0
+
+	.byte	%00011100
+	.byte	%00111110
+	.byte	%01110111
+	.byte	%01100011
+	.byte	%11100011
+
+	.byte	%11100011
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11100011
+
+	.byte	%01100011
+	.byte	%01100011
+	.byte	%01110111
+	.byte	%00111110
+	.byte	%00011100
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	%11100011
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11001001
+	.byte	%11001001
+	.byte	%11001001
+
+	.byte	%11011101
+	.byte	%11011101
+	.byte	%11111111
+	.byte	%01110111
+	.byte	%01100011
+
+	.byte	0
+	.byte	0
+
+	.byte	%00011100
+	.byte	%00111110
+	.byte	%01110111
+	.byte	%01100011
+	.byte	%11100011
+
+	.byte	%11100011
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11100011
+
+	.byte	%01100011
+	.byte	%01100011
+	.byte	%01110111
+	.byte	%00111110
+	.byte	%00011100
+
+	.byte	0
+	.byte	0
+
+	.byte	%11111110
+	.byte	%11111111
+	.byte	%11000011
+	.byte	%11000001
+	.byte	%11000001
+
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000011
+
+	.byte	%11111111
+	.byte	%11111111
+	.byte	%11000011
+	.byte	%11000001
+	.byte	%11000001
+
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11100011
+	.byte	0
+	.byte	0
+
+	.byte	%11100000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11000000
+	.byte	%11111111
+	.byte	%11111111
+
+	.byte	0
+	.byte	0
+
+	.byte	%11111100
+	.byte	%11111110
+	.byte	%11000111
+	.byte	%11000011
+	.byte	%11000011
+
+	.byte	%11000011
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000001
+	.byte	%11000011
+
+	.byte	%11000011
+	.byte	%11000011
+	.byte	%11000111
+	.byte	%11111110
+	.byte	%11111100
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.repend
+
+BitmapR:
+	.repeat 2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	0
+	.byte	0
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	2
+	.byte	2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	2
+	.byte	2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+	.byte	2
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+	.byte	0
+
+	.repend
 
 ; Reset / Start vectors
 	.org	$FFFC
