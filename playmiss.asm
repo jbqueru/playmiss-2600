@@ -12,6 +12,50 @@
 ; See the License for the specific language governing permissions and
 ; limitations under the License.
 
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;                                            ;;
+;;  SET THE PLAYER/MISSILE GRAPHICS POINTERS  ;;
+;;                                            ;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+;;;
+;;; Here's the story.
+;;;
+;;; It's December 2022, OpenAI has opened a beta of ChatGPT to the public.
+;;; One of the fun activities is to ask ChatGPT to generate code. In many
+;;; cases, it does, and sometimes the code even works.
+;;;
+;;; Playing along, I asked it to generate a Hello World for Atari 2600.
+;;; It outpout something that mostly looked like 6502 assembly for 2600,
+;;; but that was hilariously meaningless. Literally like someone copy-pasting
+;;; snippets of code without understanding what they do.
+;;;
+;;; I posted about my experience on LinkedIn along with some code snippets,
+;;; and a coworker noticed an ominous  comment that ChatGPT had generated:
+;;; "Set the player/missile graphics pointers".
+;;;
+;;; The 2600 has player/missile size (NUSIZn), player/missile color (COLUPn),
+;;; but there's no such think as missile graphics.
+;;;
+;;; The challenge was on, I made it a mission to create a Hello World where
+;;; that specific comment would make sense. This is the result.
+;;;
+;;; The basic idea here is to use the missile as a 9th pixel, immediately
+;;; touching a single copy of the player graphics, to use that as the
+;;; support for a scroller, and to have a single pointer for the entire
+;;; graphics.
+;;;
+;;; I limited myself to 128 lines instead of the usual 192, because that
+;;; made some of the coding easier. In reality, using 9 pixels that way
+;;; would probably be easier with 2 separate pointers: that would allow
+;;; 192 lines (or more) more easily, and it would save an index increment
+;;; per line. In that case, though, the exact comment that ChatGPT had
+;;; generated wouldn't make as much sense.
+;;;
+;;; There you have it, a piece of code created specifically to be able
+;;; to use an improbable AI-generated comment.
+;;;
+
 	.processor	6502
 
 _TIA_VSYNC	.equ	$00
@@ -86,25 +130,30 @@ _TIA_LU_LIGHT	.equ	$A
 _TIA_LU_V_LIGHT	.equ	$C
 _TIA_LU_MAX	.equ	$E
 
+_ZP_PMG_PTR_LO	.equ	$80
+_ZP_PMG_PTR_HI	.equ	$81
+
 	.org	$F000,0
 Main:
 ; Set up CPU
-	CLD
-	LDX	#$FF
-	TXS
+	CLD			; Clear decimal mode
+	LDX	#$FF		; Initial stack pointer
+	TXS			; Set stack pointer
 
 ; Clear zero-page (TIA + RAM)
 	LDA	#0
 	TAX
-Clear:	STA	0,X
+ClearZeroPage:
+	STA	0,X
 	INX
-	BNE	Clear
+	BNE	ClearZeroPage
 
 ; Set the player/missile graphics pointers
+; (!!!)
 	LDA	#0
-	STA	$80
-	LDA	#$F1
-	STA	$81
+	STA	_ZP_PMG_PTR_LO
+	LDA	#Bitmap >> 8
+	STA	_ZP_PMG_PTR_HI
 
 Loop:
 ; -------------------------------
@@ -143,6 +192,7 @@ Vblank:
 	STA	_TIA_WSYNC
 
 	; Start delay code 44 clocks
+        ; WARNING: BRANCH MUST NOT CROSS PAGE BOUNDARY
 	LDA	#$0A		; 2 clocks
 	; hidden ASL		; 4 * 2 clocks = 8
 	NOP			; 5 * 2 clocks
@@ -150,33 +200,36 @@ Vblank:
 	BPL	*-3		; 4 * 3 clocks + 2 = 14
 	; End delay code 44 clocks
 
-	STA	_TIA_RESP0
-	STA	_TIA_RESM0
+	; There's a bit of black magic here: even though the two writes to
+	; tRESP0 and RESM0 are 9 pixels apart (3 CPU cycles), the graphics
+	; end up only 8 pixels apart, because player graphics appear 1 pixel
+	; furhter to the right than ball/missile for the same setting.
+	STA	_TIA_RESP0	; position player graphics.
+	STA	_TIA_RESM0	; position missile.
 	LDA	#_TIA_CO_TURQ+_TIA_LU_MAX
 	STA	_TIA_COLUP0
-	LDA	#$AA
-	STA	_TIA_GRP0
-	LDA	#2
-	STA	_TIA_ENAM0
 
-	LDA	$80
+	; Advance the player/missile graphics pointer
+	LDA	_ZP_PMG_PTR_LO
 	CLC
 	ADC	#2
-	STA	$80
+	STA	_ZP_PMG_PTR_LO
 	BCC	DonePtr
-	INC	$81
-	LDA	#$F3
-	CMP	$81
+	INC	_ZP_PMG_PTR_HI
+	LDA	#(Bitmap >> 8) +2
+	CMP	_ZP_PMG_PTR_HI
 	BNE	DonePtr
-	LDA	#$F1
-        STA	$81
+	LDA	#Bitmap >> 8
+        STA	_ZP_PMG_PTR_HI
 DonePtr:
+
 ; -------------------------------
 ; Vblank line 37
 ; Turn display on and start render loop
 	STA	_TIA_WSYNC
 
 	; Start delay code 68 clocks
+        ; WARNING: BRANCH MUST NOT CROSS PAGE BOUNDARY
 	LDX	#13		; 2 clocks
 	DEX			; 13 * 2 clocks = 26
 	BNE	*-1		; 12 * 3 clocks + 2 = 38
@@ -217,7 +270,7 @@ ExtraLines:
 	JMP	Loop
 
 ; The actual graphics
-	.org	$F100
+	.org	$F100,01	; MUST BE PAGE-ALIGNED
 Bitmap:
 	.byte	%11100011,2
 	.byte	%11000001,2
