@@ -211,6 +211,8 @@ Vblank:
 	STA	_TIA_COLUP0
 
 	; Advance the player/missile graphics pointers
+        ; Since the graphics are page-aligned and 256 bytes long,
+        ; we only need to increment the low byte and let it wrap.
 	INC	_ZP_PG_PTR_LO
 	INC	_ZP_MG_PTR_LO
 
